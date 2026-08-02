@@ -118,6 +118,20 @@
       pointer-events: none;
     }
     #key-panel h3 { font-size: 15px; margin-bottom: 8px; }
+    #key-panel select, #key-panel textarea {
+      width: 100%;
+      padding: 8px 10px;
+      border-radius: 8px;
+      border: 1px solid rgba(255,255,255,0.15);
+      background: rgba(0,0,0,0.35);
+      color: #eee;
+      font-size: 13px;
+      margin-bottom: 10px;
+      font-family: inherit;
+      resize: vertical;
+    }
+    #key-panel select option { background: #1a1a20; }
+    #key-panel textarea.hidden { display: none; }
     #key-panel p { font-size: 12.5px; color: rgba(255,255,255,0.7); line-height: 1.5; margin-bottom: 10px; }
     #key-panel a { color: #8ab4ff; }
     #key-panel input[type="password"], #key-panel input[type="text"] {
@@ -228,6 +242,18 @@
     <label class="remember">
       <input type="checkbox" id="key-remember" /> Remember on this device
     </label>
+    <h3>Style</h3>
+    <select id="style-select">
+      <option value="movie3d">3D animated movie</option>
+      <option value="anime">Anime</option>
+      <option value="clay">Claymation</option>
+      <option value="pixel">Pixel art</option>
+      <option value="watercolor">Watercolor</option>
+      <option value="custom">Custom prompt…</option>
+    </select>
+    <textarea id="style-custom" rows="3"
+      placeholder="Describe the transformation, e.g. 'Turn the person into a marble statue'"
+      class="hidden"></textarea>
     <div class="row">
       <button id="key-save">Save</button>
       <button id="key-clear">Clear</button>

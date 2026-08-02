@@ -7,7 +7,8 @@ effect is applied inside the quad your fingers form, like the camera-framing
 gesture effect.
 
 Built with [MediaPipe Hand Landmarker](https://ai.google.dev/edge/mediapipe/solutions/vision/hand_landmarker)
-(browser WASM/GPU, loaded from CDN) + plain Canvas 2D. No build step.
+(browser WASM/GPU, vendored in `vendor/mediapipe/` so the page loads no
+third-party code) + plain Canvas 2D. No build step.
 
 ## Run
 
@@ -60,6 +61,10 @@ AI ✨ effect.
 - Each generation is one image request (~$0.04 on paid tier, or free-tier
   quota). A new generation triggers each time you re-form the frame after
   fully dropping it.
+- Pick a style in the 🔑 panel — 3D animated movie (default), anime,
+  claymation, pixel art, watercolor, or write a fully custom prompt. A
+  "keep the same pose and framing" suffix is always appended so the result
+  maps cleanly back into the finger frame.
 
 ## Demo mode (no camera)
 

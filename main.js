@@ -1,12 +1,12 @@
+// MediaPipe is vendored locally (see vendor/mediapipe/) so the page loads no
+// third-party code — important since users may store an API key in the browser.
 import {
   HandLandmarker,
   FilesetResolver,
-} from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14";
+} from "./vendor/mediapipe/vision_bundle.mjs";
 
-const WASM_URL =
-  "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm";
-const MODEL_URL =
-  "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task";
+const WASM_URL = "./vendor/mediapipe/wasm";
+const MODEL_URL = "./vendor/mediapipe/hand_landmarker.task";
 
 // Demo mode (?demo): synthetic video + fake landmarks, for testing without a camera.
 const DEMO = new URLSearchParams(location.search).has("demo");
@@ -41,11 +41,36 @@ const EFFECTS = [
 
 // ---- AI effect (Gemini image-to-image) state ----
 const AI_MODEL = "gemini-2.5-flash-image";
-const AI_PROMPT =
-  "Transform the person in this image into a 3D animated movie character " +
-  "(stylized CGI animation look, expressive big eyes, soft lighting). Keep the " +
-  "same pose, framing, clothing colors, and background composition. " +
-  "Return only the transformed image.";
+const AI_STYLES = {
+  movie3d:
+    "Transform the person in this image into a 3D animated movie character " +
+    "(stylized CGI animation look, expressive big eyes, soft lighting).",
+  anime:
+    "Redraw this image as a hand-drawn anime illustration with clean line " +
+    "art, cel shading, and vibrant colors.",
+  clay:
+    "Transform the person in this image into a claymation stop-motion clay " +
+    "character with visible clay texture.",
+  pixel:
+    "Redraw this image as detailed retro pixel art in a 16-bit video game style.",
+  watercolor:
+    "Repaint this image as a soft watercolor painting with loose brushwork " +
+    "and gentle color bleeds.",
+};
+// Always appended so the result maps cleanly back into the finger frame.
+const AI_PROMPT_SUFFIX =
+  " Keep the same pose, framing, clothing colors, and background " +
+  "composition. Return only the transformed image.";
+let aiStyle = localStorage.getItem("ai-style") || "movie3d";
+let aiCustomPrompt = localStorage.getItem("ai-style-custom") || "";
+
+function aiPrompt() {
+  const style =
+    aiStyle === "custom" && aiCustomPrompt.trim()
+      ? aiCustomPrompt.trim()
+      : AI_STYLES[aiStyle] || AI_STYLES.movie3d;
+  return style + AI_PROMPT_SUFFIX;
+}
 let apiKey =
   localStorage.getItem("gemini-key") || sessionStorage.getItem("gemini-key") || "";
 let aiState = "idle"; // idle | generating | ready | error
@@ -112,11 +137,19 @@ function setupKeyPanel() {
   const panel = document.getElementById("key-panel");
   const input = document.getElementById("key-input");
   const remember = document.getElementById("key-remember");
+  const styleSelect = document.getElementById("style-select");
+  const styleCustom = document.getElementById("style-custom");
 
   input.value = apiKey;
   remember.checked = !!localStorage.getItem("gemini-key");
+  styleSelect.value = aiStyle;
+  styleCustom.value = aiCustomPrompt;
+  styleCustom.classList.toggle("hidden", aiStyle !== "custom");
 
   btn.addEventListener("click", () => panel.classList.toggle("hidden"));
+  styleSelect.addEventListener("change", () => {
+    styleCustom.classList.toggle("hidden", styleSelect.value !== "custom");
+  });
   document.getElementById("key-save").addEventListener("click", () => {
     apiKey = input.value.trim();
     localStorage.removeItem("gemini-key");
@@ -124,6 +157,12 @@ function setupKeyPanel() {
     if (apiKey) {
       (remember.checked ? localStorage : sessionStorage).setItem("gemini-key", apiKey);
     }
+    aiStyle = styleSelect.value;
+    aiCustomPrompt = styleCustom.value;
+    localStorage.setItem("ai-style", aiStyle);
+    localStorage.setItem("ai-style-custom", aiCustomPrompt);
+    // New style means the cached result is stale — regenerate on next framing.
+    aiImage = null;
     aiState = "idle";
     aiError = "";
     panel.classList.add("hidden");
@@ -441,7 +480,7 @@ async function generateAI(q) {
           contents: [
             {
               parts: [
-                { text: AI_PROMPT },
+                { text: aiPrompt() },
                 { inline_data: { mime_type: "image/jpeg", data: imageB64 } },
               ],
             },
