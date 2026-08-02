@@ -7,8 +7,7 @@ effect is applied inside the quad your fingers form, like the camera-framing
 gesture effect.
 
 Built with [MediaPipe Hand Landmarker](https://ai.google.dev/edge/mediapipe/solutions/vision/hand_landmarker)
-(browser WASM/GPU, vendored in `vendor/mediapipe/` so the page loads no
-third-party code) + plain Canvas 2D. No build step.
+(browser WASM/GPU, loaded from CDN) + plain Canvas 2D. No build step.
 
 ## Run
 
