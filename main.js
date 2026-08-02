@@ -149,55 +149,41 @@ function lerpPt(a, b, t) {
   return { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t };
 }
 
-// Given landmark sets for exactly two hands, return the 4 frame corners
-// (index tip + thumb tip of each hand) ordered around their centroid,
-// or null if the hands aren't making an open "L" shape.
+// Given landmark sets for exactly two hands, return the 4 frame corners in
+// ANATOMICAL order: [left.index, right.thumb, right.index, left.thumb]
+// ("left"/"right" = on-screen wrist position). Each corner belongs to a
+// specific finger, so the edge cycle is honest geometry: two upright "L"s
+// trace a rectangle, and flipping one hand's fingers makes the edges cross
+// into a bowtie of two triangles — and uncrossing recovers by itself, since
+// nothing about the ordering is stateful.
 function computeQuad(hands) {
-  const pts = [];
-  for (const lm of hands) {
-    const thumb = toPixel(lm[THUMB_TIP]);
-    const index = toPixel(lm[INDEX_TIP]);
+  const info = hands.map((lm) => ({
+    index: toPixel(lm[INDEX_TIP]),
+    thumb: toPixel(lm[THUMB_TIP]),
+    wristX: toPixel(lm[WRIST]).x,
     // Hand size from wrist -> middle knuckle: stable regardless of which way
     // the fingers point (unlike finger-based measures, which foreshorten).
-    const handScale = dist(toPixel(lm[WRIST]), toPixel(lm[MIDDLE_MCP])) + 1;
-    // Require thumb and index spread apart (an open "L"). Hysteresis: easy to
-    // keep once active, so rotating/foreshortening fingers doesn't drop it.
-    const needed = frameActive ? 0.2 : 0.75;
-    if (dist(thumb, index) < handScale * needed) return null;
-    pts.push(index, thumb);
+    scale: dist(toPixel(lm[WRIST]), toPixel(lm[MIDDLE_MCP])) + 1,
+  }));
+  // Require thumb and index spread apart (an open "L"). Hysteresis: easy to
+  // keep once active, so rotating/foreshortening fingers doesn't drop it.
+  const needed = frameActive ? 0.2 : 0.75;
+  for (const hd of info) {
+    if (dist(hd.thumb, hd.index) < hd.scale * needed) return null;
   }
+  info.sort((a, b) => a.wristX - b.wristX);
+  const [A, B] = info;
+  const pts = [A.index, B.thumb, B.index, A.thumb];
+  // Degenerate-frame gate on the spanned extent (angle-sorted area) — the
+  // traced area is near zero for a legitimate crossed (bowtie) frame.
   const cx = pts.reduce((s, p) => s + p.x, 0) / 4;
   const cy = pts.reduce((s, p) => s + p.y, 0) / 4;
-  pts.sort(
+  const hull = [...pts].sort(
     (a, b) => Math.atan2(a.y - cy, a.x - cx) - Math.atan2(b.y - cy, b.x - cx)
   );
-  // Reject degenerate frames (hands overlapping / quad collapsed).
-  // Crossed/overlapping hands can collapse the tip quad — keep tracking
-  // through much smaller areas once the frame is established.
   const minArea = frameActive ? 0.0005 : 0.005;
-  if (polygonArea(pts) < canvas.width * canvas.height * minArea) return null;
+  if (polygonArea(hull) < canvas.width * canvas.height * minArea) return null;
   return pts;
-}
-
-// Align an angle-sorted target quad with the previous corners. Only cyclic
-// rotations and reversal of the sorted order are considered — every candidate
-// stays a simple (non-self-intersecting) polygon, so the quad can never lock
-// into a twisted bowtie no matter how the hands cross, while corner identity
-// still carries over smoothly frame to frame.
-function alignQuad(target, prev) {
-  let best = target;
-  let bestD = Infinity;
-  for (const dir of [1, -1]) {
-    for (let off = 0; off < 4; off++) {
-      const cand = [0, 1, 2, 3].map((i) => target[(off + dir * i + 8) % 4]);
-      const d = cand.reduce((s, p, i) => s + dist(p, prev[i]), 0);
-      if (d < bestD) {
-        bestD = d;
-        best = cand;
-      }
-    }
-  }
-  return best;
 }
 
 function polygonArea(pts) {
@@ -638,7 +624,8 @@ function loop() {
       corners = targetQuad;
       presence = Math.min(1, presence + 0.12);
     } else {
-      const matched = alignQuad(targetQuad, corners);
+      // Corner slots are anatomical (same finger every frame) — smooth 1:1.
+      const matched = targetQuad;
       const moved =
         matched.reduce((s, p, i) => s + dist(p, corners[i]), 0) / 4;
       // Occluded/crossing hands produce wild one-frame mis-detections.
