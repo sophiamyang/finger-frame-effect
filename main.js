@@ -181,6 +181,24 @@ function computeQuad(hands) {
   return pts;
 }
 
+// Re-order points by angle around their centroid (canonical simple polygon).
+function angleSort(pts) {
+  const cx = pts.reduce((s, p) => s + p.x, 0) / pts.length;
+  const cy = pts.reduce((s, p) => s + p.y, 0) / pts.length;
+  return [...pts].sort(
+    (a, b) => Math.atan2(a.y - cy, a.x - cx) - Math.atan2(b.y - cy, b.x - cx)
+  );
+}
+
+// A self-intersecting (bowtie) corner ordering has near-zero shoelace area
+// because its two halves cancel. If the current order is twisted — which can
+// happen when hands cross over each other — re-canonicalize so the quad
+// untwists instead of staying stuck.
+function untwist(pts) {
+  const sorted = angleSort(pts);
+  return polygonArea(pts) < 0.6 * polygonArea(sorted) ? sorted : pts;
+}
+
 // Keep corner identity stable across frames: greedily assign each previous
 // corner its nearest target point, so the quad can't twist when the
 // angle-sort ordering flips during hand rotation.
@@ -654,7 +672,7 @@ function loop() {
         // Adaptive smoothing: follow briskly for normal motion, heavily
         // damped for large deltas so glitches read as a wobble, not a snap.
         const alpha = moved > canvas.width * 0.08 ? 0.15 : 0.4;
-        corners = corners.map((c, i) => lerpPt(c, matched[i], alpha));
+        corners = untwist(corners.map((c, i) => lerpPt(c, matched[i], alpha)));
         presence = Math.min(1, presence + 0.12);
       }
     }
