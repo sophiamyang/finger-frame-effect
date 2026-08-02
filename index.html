@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Finger Frame</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      height: 100%;
+      background: #0a0a0c;
+      color: #eee;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      overflow: hidden;
+    }
+    #stage {
+      position: fixed;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    canvas {
+      max-width: 100%;
+      max-height: 100%;
+      border-radius: 12px;
+    }
+    video { display: none; }
+
+    #status {
+      position: fixed;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      align-items: center;
+      justify-content: center;
+      background: #0a0a0c;
+      z-index: 10;
+      transition: opacity 0.4s;
+      text-align: center;
+      padding: 24px;
+    }
+    #status.hidden { opacity: 0; pointer-events: none; }
+    .spinner {
+      width: 28px; height: 28px;
+      border: 3px solid #333;
+      border-top-color: #eee;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    #hint {
+      position: fixed;
+      left: 0; right: 0;
+      bottom: 84px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 10px;
+      pointer-events: none;
+      transition: opacity 0.4s;
+      z-index: 5;
+      animation: hint-float 3.2s ease-in-out infinite;
+    }
+    #hint.hidden { opacity: 0; }
+    #hint-text {
+      font-size: 15px;
+      color: rgba(255,255,255,0.9);
+      text-shadow: 0 1px 6px rgba(0,0,0,0.8);
+      animation: hint-pulse 2.4s ease-in-out infinite;
+    }
+    @keyframes hint-pulse {
+      0%, 100% { opacity: 0.65; }
+      50% { opacity: 1; }
+    }
+    @keyframes hint-float {
+      0%, 100% { transform: translateY(0); }
+      50% { transform: translateY(-5px); }
+    }
+
+    #toolbar {
+      position: fixed;
+      left: 50%;
+      bottom: 20px;
+      transform: translateX(-50%);
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      max-width: calc(100vw - 24px);
+      gap: 8px;
+      padding: 8px;
+      background: rgba(20,20,24,0.72);
+      backdrop-filter: blur(12px);
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 14px;
+      z-index: 6;
+    }
+    #toolbar button {
+      appearance: none;
+      border: none;
+      background: transparent;
+      color: rgba(255,255,255,0.75);
+      font-size: 13px;
+      font-weight: 600;
+      padding: 8px 14px;
+      border-radius: 9px;
+      cursor: pointer;
+      transition: background 0.15s, color 0.15s;
+      font-family: inherit;
+    }
+    #toolbar button:hover { background: rgba(255,255,255,0.08); }
+    #toolbar button.active {
+      background: #fff;
+      color: #111;
+    }
+    #toolbar button .key {
+      opacity: 0.5;
+      font-weight: 400;
+      margin-right: 5px;
+      font-size: 11px;
+    }
+  </style>
+</head>
+<body>
+  <div id="status">
+    <div class="spinner"></div>
+    <div id="status-text">Loading hand tracker…</div>
+  </div>
+
+  <div id="stage">
+    <video id="video" autoplay playsinline muted></video>
+    <canvas id="canvas"></canvas>
+  </div>
+
+  <div id="hint">
+    <div id="hint-text">Frame your shot 🎬 — both hands up, thumbs and index fingers out.</div>
+  </div>
+
+  <div id="toolbar"></div>
+
+  <script type="module" src="main.js"></script>
+</body>
+</html>
