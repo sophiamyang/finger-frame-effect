@@ -59,7 +59,13 @@ let presence = 0;
 let frameActive = false;
 // Frames since the quad was last seen; short dropouts hold the last quad.
 let lostFrames = 0;
-const MAX_LOST_FRAMES = 18;
+// Crossing/overlapping hands often occlude each other and break detection
+// for a while — hold the last quad through a generous dropout window.
+const MAX_LOST_FRAMES = 40;
+// Frames in a row a far-jumped quad must persist before we accept it as a
+// real reposition rather than a mis-detection during hand overlap.
+const JUMP_CONFIRM_FRAMES = 5;
+let jumpFrames = 0;
 
 let landmarker = null;
 let lastVideoTime = -1;
@@ -158,7 +164,7 @@ function computeQuad(hands) {
     const handScale = dist(toPixel(lm[WRIST]), toPixel(lm[MIDDLE_MCP])) + 1;
     // Require thumb and index spread apart (an open "L"). Hysteresis: easy to
     // keep once active, so rotating/foreshortening fingers doesn't drop it.
-    const needed = frameActive ? 0.35 : 0.75;
+    const needed = frameActive ? 0.2 : 0.75;
     if (dist(thumb, index) < handScale * needed) return null;
     pts.push(index, thumb);
   }
@@ -168,7 +174,9 @@ function computeQuad(hands) {
     (a, b) => Math.atan2(a.y - cy, a.x - cx) - Math.atan2(b.y - cy, b.x - cx)
   );
   // Reject degenerate frames (hands overlapping / quad collapsed).
-  const minArea = frameActive ? 0.002 : 0.005;
+  // Crossed/overlapping hands can collapse the tip quad — keep tracking
+  // through much smaller areas once the frame is established.
+  const minArea = frameActive ? 0.0005 : 0.005;
   if (polygonArea(pts) < canvas.width * canvas.height * minArea) return null;
   return pts;
 }
@@ -623,15 +631,33 @@ function loop() {
   }
 
   if (targetQuad) {
-    lostFrames = 0;
-    frameActive = true;
     if (!corners) {
+      lostFrames = 0;
+      frameActive = true;
+      jumpFrames = 0;
       corners = targetQuad;
+      presence = Math.min(1, presence + 0.12);
     } else {
       const matched = matchToPrev(targetQuad, corners);
-      corners = corners.map((c, i) => lerpPt(c, matched[i], 0.4));
+      const moved =
+        matched.reduce((s, p, i) => s + dist(p, corners[i]), 0) / 4;
+      // Occluded/crossing hands produce wild one-frame mis-detections.
+      // Ignore a far-jumped quad unless it persists — then it's a real move.
+      if (moved > canvas.width * 0.18 && ++jumpFrames < JUMP_CONFIRM_FRAMES) {
+        if (++lostFrames > MAX_LOST_FRAMES) {
+          presence = Math.max(0, presence - 0.05);
+        }
+      } else {
+        lostFrames = 0;
+        frameActive = true;
+        jumpFrames = 0;
+        // Adaptive smoothing: follow briskly for normal motion, heavily
+        // damped for large deltas so glitches read as a wobble, not a snap.
+        const alpha = moved > canvas.width * 0.08 ? 0.15 : 0.4;
+        corners = corners.map((c, i) => lerpPt(c, matched[i], alpha));
+        presence = Math.min(1, presence + 0.12);
+      }
     }
-    presence = Math.min(1, presence + 0.12);
   } else if (corners && ++lostFrames <= MAX_LOST_FRAMES) {
     // Brief tracking dropout: hold the last quad instead of fading.
     presence = Math.min(1, presence + 0.12);
@@ -640,6 +666,7 @@ function loop() {
     if (presence === 0) {
       corners = null;
       frameActive = false;
+      jumpFrames = 0;
     }
   }
 
