@@ -33,7 +33,7 @@ Then open http://localhost:8123 in a browser and allow camera access.
 
 ## Effects
 
-Switch with the toolbar or keys 1–6:
+Switch with the toolbar or keys 1–8:
 
 1. **Pixelate** — mosaic censor effect (downscale + nearest-neighbor upscale)
 2. **Blur** — frosted-glass blur
@@ -42,7 +42,10 @@ Switch with the toolbar or keys 1–6:
 5. **Glitch** — chromatic aberration, slice displacement, scanlines
 6. **Toon** — cel-shaded cartoon version of the live feed: smoothed,
    posterized color bands + dark ink outlines from edge detection
-7. **AI ✨** — hold the frame steady for ~1 second and Gemini's image model
+7. **Van Gogh** — live painterly rendering with no AI: brush strokes
+   oriented along image edges, swirl fields in flat areas, saturated
+   posterized palette. Computed per-frame, so it moves with you in real time
+8. **AI ✨** — hold the frame steady for ~1 second and Gemini's image model
    redraws the framed region as a 3D animated movie character, warped back
    into your finger frame (requires an API key, see below)
 

@@ -36,6 +36,7 @@ const EFFECTS = [
   { id: "noir", label: "Noir" },
   { id: "glitch", label: "Glitch" },
   { id: "toon", label: "Toon" },
+  { id: "vangogh", label: "Van Gogh" },
   { id: "ai", label: "AI ✨" },
 ];
 
@@ -382,6 +383,10 @@ function applyEffect(q) {
       drawToon(w, h);
       break;
     }
+    case "vangogh": {
+      drawVanGogh(q, w, h);
+      break;
+    }
     case "ai": {
       if (aiImage) {
         // The stylized image is a full-frame render aligned with the camera
@@ -523,6 +528,103 @@ async function generateAI() {
       if (aiState === "error") aiState = "idle";
     }, 4000);
   }
+}
+
+// ---- Van Gogh: live painterly rendering, no AI ----
+// Classic stroke-based rendering: short brush strokes oriented along image
+// edges (tangent to the gradient), with gentle swirls in flat areas and a
+// saturated, posterized palette. Runs per-frame, so it moves with you.
+const vg = document.createElement("canvas");
+const vgCtx = vg.getContext("2d", { willReadFrequently: true });
+const VG_SCALE = 4;
+
+function vgHash(x, y) {
+  // Deterministic per-position jitter so strokes don't shimmer frame to frame.
+  const n = Math.sin(x * 127.1 + y * 311.7) * 43758.5453;
+  return n - Math.floor(n);
+}
+
+function drawVanGogh(q, w, h) {
+  const sw = Math.ceil(w / VG_SCALE);
+  const sh = Math.ceil(h / VG_SCALE);
+  if (vg.width !== sw || vg.height !== sh) {
+    vg.width = sw;
+    vg.height = sh;
+  }
+  vgCtx.filter = "saturate(1.9) contrast(1.15)";
+  drawMirrored(vgCtx, sw, sh);
+  vgCtx.filter = "none";
+  const d = vgCtx.getImageData(0, 0, sw, sh).data;
+
+  const lum = new Float32Array(sw * sh);
+  for (let i = 0, p = 0; i < lum.length; i++, p += 4) {
+    lum[i] = 0.299 * d[p] + 0.587 * d[p + 1] + 0.114 * d[p + 2];
+  }
+
+  // Underpainting so gaps between strokes read as canvas, not raw video.
+  ctx.filter = "blur(8px) saturate(1.8) brightness(0.9)";
+  drawMirrored(ctx, w, h);
+  ctx.filter = "none";
+
+  // Brush strokes over the framed region only (perf: skip the rest).
+  const b = quadBBox(q);
+  const x0 = Math.max(8, b.x0);
+  const y0 = Math.max(8, b.y0);
+  const x1 = Math.min(w - 8, b.x1);
+  const y1 = Math.min(h - 8, b.y1);
+  const step = 7;
+  const t = performance.now() / 1000;
+  ctx.lineCap = "round";
+
+  for (let y = y0; y < y1; y += step) {
+    for (let x = x0; x < x1; x += step) {
+      const jr = vgHash(x, y);
+      const px = x + (jr - 0.5) * step;
+      const py = y + (vgHash(y, x) - 0.5) * step;
+      const sx = Math.min(sw - 2, Math.max(1, Math.round(px / VG_SCALE)));
+      const sy = Math.min(sh - 2, Math.max(1, Math.round(py / VG_SCALE)));
+      const i = sy * sw + sx;
+
+      // Sobel gradient on luminance.
+      const gx =
+        -lum[i - sw - 1] - 2 * lum[i - 1] - lum[i + sw - 1] +
+        lum[i - sw + 1] + 2 * lum[i + 1] + lum[i + sw + 1];
+      const gy =
+        -lum[i - sw - 1] - 2 * lum[i - sw] - lum[i - sw + 1] +
+        lum[i + sw - 1] + 2 * lum[i + sw] + lum[i + sw + 1];
+      const mag = Math.hypot(gx, gy);
+
+      // Stroke along the edge tangent; in flat areas, follow a slow swirl
+      // field (the Van Gogh signature) that drifts gently over time.
+      let angle;
+      if (mag > 24) {
+        angle = Math.atan2(gy, gx) + Math.PI / 2;
+      } else {
+        angle =
+          Math.sin(px * 0.012 + t * 0.4) * 1.6 +
+          Math.cos(py * 0.011 - t * 0.3) * 1.6 +
+          jr * 0.8;
+      }
+
+      const p = i * 4;
+      const r = posterLUT[d[p]];
+      const g = posterLUT[d[p + 1]];
+      const bl = posterLUT[d[p + 2]];
+      // Longer, thinner strokes in flat areas; short dabs on edges.
+      const len = mag > 24 ? 8 + jr * 5 : 13 + jr * 7;
+      const dx = (Math.cos(angle) * len) / 2;
+      const dy = (Math.sin(angle) * len) / 2;
+
+      ctx.strokeStyle = `rgb(${r},${g},${bl})`;
+      ctx.lineWidth = 3.5 + jr * 2.5;
+      ctx.globalAlpha = presence * 0.9;
+      ctx.beginPath();
+      ctx.moveTo(px - dx, py - dy);
+      ctx.lineTo(px + dx, py + dy);
+      ctx.stroke();
+    }
+  }
+  ctx.globalAlpha = presence;
 }
 
 // ---- Toon: cel-shaded cartoon version of the live feed ----
