@@ -57,10 +57,13 @@ const AI_STYLES = {
     "Repaint this image as a soft watercolor painting with loose brushwork " +
     "and gentle color bleeds.",
 };
-// Always appended so the result maps cleanly back into the finger frame.
+// Always appended so the result stays registered with the live feed.
 const AI_PROMPT_SUFFIX =
-  " Keep the same pose, framing, clothing colors, and background " +
-  "composition. Return only the transformed image.";
+  " This is critical: preserve the EXACT position, scale, and framing of " +
+  "every element — the face, body, hands, and background must stay in " +
+  "precisely the same place and size as the original photo. Do not enlarge, " +
+  "recenter, zoom, or crop anything. Same pose, same expression, same " +
+  "clothing colors, same background. Return only the transformed image.";
 let aiStyle = localStorage.getItem("ai-style") || "movie3d";
 let aiCustomPrompt = localStorage.getItem("ai-style-custom") || "";
 
@@ -76,6 +79,10 @@ let apiKey =
 let aiState = "idle"; // idle | generating | ready | error
 let aiImage = null;
 let aiError = "";
+let aiLastGen = 0;
+// Re-stylize every few seconds while the frame is held, so the window keeps
+// up as the person moves. Each refresh is one image request.
+const AI_REFRESH_MS = 6000;
 let stableFrames = 0;
 let lastRawQuad = null;
 // Full-res snapshot canvas for captures.
@@ -376,7 +383,7 @@ function applyEffect(q) {
       break;
     }
     case "ai": {
-      if (aiState === "ready" && aiImage) {
+      if (aiImage) {
         // The stylized image is a full-frame render aligned with the camera
         // feed — draw it screen-aligned so the finger frame acts as a window
         // revealing it, staying registered with the real scene as hands move.
@@ -461,6 +468,7 @@ function captureFrame() {
 async function generateAI() {
   aiState = "generating";
   aiError = "";
+  aiLastGen = performance.now();
   try {
     const imageB64 = captureFrame();
     const res = await fetch(
@@ -502,6 +510,12 @@ async function generateAI() {
     aiState = "ready";
   } catch (err) {
     console.error("AI generation failed:", err);
+    // If a refresh failed but we still have a previous result, keep showing
+    // it and retry quietly on the next refresh cycle.
+    if (aiImage) {
+      aiState = "ready";
+      return;
+    }
     aiError = err.message;
     aiState = "error";
     // Let the error linger, then allow another attempt.
@@ -639,14 +653,20 @@ function loop() {
     }
     presence = Math.min(1, presence + 0.12);
 
-    // AI effect: trigger a generation once the frame is held steady.
-    if (effect === "ai" && apiKey && aiState === "idle" && !aiImage) {
+    // AI effect: generate once the frame is held steady, then keep
+    // refreshing periodically so the stylized layer tracks the person.
+    if (effect === "ai" && apiKey && aiState !== "generating" && aiState !== "error") {
       if (lastRawQuad) {
         const moved =
           targetQuad.reduce((s, p, i) => s + dist(p, lastRawQuad[i]), 0) / 4;
         stableFrames = moved < canvas.width * 0.01 ? stableFrames + 1 : 0;
       }
-      if (stableFrames > 20) {
+      const needFirst = !aiImage && stableFrames > 20;
+      const needRefresh =
+        aiImage &&
+        stableFrames > 5 &&
+        performance.now() - aiLastGen > AI_REFRESH_MS;
+      if (needFirst || needRefresh) {
         stableFrames = 0;
         generateAI();
       }
