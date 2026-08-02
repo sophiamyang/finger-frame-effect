@@ -1,5 +1,7 @@
 # Finger Frame
 
+**Live demo: https://sophiamyang.github.io/finger-frame-effect/**
+
 Hold up both hands and frame a box with your index fingers and thumbs — a live
 effect is applied inside the quad your fingers form, like the camera-framing
 gesture effect.
