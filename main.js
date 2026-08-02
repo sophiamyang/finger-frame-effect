@@ -36,7 +36,26 @@ const EFFECTS = [
   { id: "noir", label: "Noir" },
   { id: "glitch", label: "Glitch" },
   { id: "toon", label: "Toon" },
+  { id: "ai", label: "AI ✨" },
 ];
+
+// ---- AI effect (Gemini image-to-image) state ----
+const AI_MODEL = "gemini-2.5-flash-image";
+const AI_PROMPT =
+  "Transform the person in this image into a 3D animated movie character " +
+  "(stylized CGI animation look, expressive big eyes, soft lighting). Keep the " +
+  "same pose, framing, clothing colors, and background composition. " +
+  "Return only the transformed image.";
+let apiKey =
+  localStorage.getItem("gemini-key") || sessionStorage.getItem("gemini-key") || "";
+let aiState = "idle"; // idle | generating | ready | error
+let aiImage = null;
+let aiError = "";
+let stableFrames = 0;
+let lastRawQuad = null;
+// Full-res snapshot canvas for captures.
+const snap = document.createElement("canvas");
+const snapCtx = snap.getContext("2d");
 
 // Offscreen canvas for the toon effect (processed at reduced resolution).
 const toon = document.createElement("canvas");
@@ -83,10 +102,43 @@ function setEffect(id) {
   toolbar.querySelectorAll("button").forEach((b) => {
     b.classList.toggle("active", b.dataset.id === id);
   });
+  if (id === "ai" && !apiKey) {
+    document.getElementById("key-panel").classList.remove("hidden");
+  }
+}
+
+function setupKeyPanel() {
+  const btn = document.getElementById("key-btn");
+  const panel = document.getElementById("key-panel");
+  const input = document.getElementById("key-input");
+  const remember = document.getElementById("key-remember");
+
+  input.value = apiKey;
+  remember.checked = !!localStorage.getItem("gemini-key");
+
+  btn.addEventListener("click", () => panel.classList.toggle("hidden"));
+  document.getElementById("key-save").addEventListener("click", () => {
+    apiKey = input.value.trim();
+    localStorage.removeItem("gemini-key");
+    sessionStorage.removeItem("gemini-key");
+    if (apiKey) {
+      (remember.checked ? localStorage : sessionStorage).setItem("gemini-key", apiKey);
+    }
+    aiState = "idle";
+    aiError = "";
+    panel.classList.add("hidden");
+  });
+  document.getElementById("key-clear").addEventListener("click", () => {
+    apiKey = "";
+    input.value = "";
+    localStorage.removeItem("gemini-key");
+    sessionStorage.removeItem("gemini-key");
+  });
 }
 
 async function init() {
   buildToolbar();
+  setupKeyPanel();
 
   let stream;
   if (DEMO) {
@@ -284,9 +336,211 @@ function applyEffect(q) {
       drawToon(w, h);
       break;
     }
+    case "ai": {
+      if (aiState === "ready" && aiImage) {
+        drawImageToQuad(ctx, aiImage, orderForTexture(q));
+      } else {
+        // Waiting / generating: blurred feed + shimmer sweep + status text.
+        ctx.filter = "blur(10px) brightness(0.85) saturate(1.1)";
+        drawMirrored(ctx, w, h);
+        ctx.filter = "none";
+        drawShimmer(q);
+        let label;
+        if (!apiKey) label = "🔑 Add your Gemini key (top right)";
+        else if (aiState === "generating") label = "✨ Dreaming you up…";
+        else if (aiState === "error") label = "⚠️ " + aiError;
+        else label = "✨ Hold the frame steady…";
+        drawQuadLabel(q, label);
+      }
+      break;
+    }
   }
 
   ctx.restore();
+}
+
+function quadBBox(q) {
+  const xs = q.map((p) => p.x);
+  const ys = q.map((p) => p.y);
+  return {
+    x0: Math.min(...xs),
+    y0: Math.min(...ys),
+    x1: Math.max(...xs),
+    y1: Math.max(...ys),
+  };
+}
+
+function drawShimmer(q) {
+  const b = quadBBox(q);
+  const w = b.x1 - b.x0;
+  const t = (performance.now() / 1400) % 1;
+  const gx = b.x0 - w * 0.3 + t * w * 1.6;
+  const grad = ctx.createLinearGradient(gx - w * 0.2, 0, gx + w * 0.2, 0);
+  grad.addColorStop(0, "rgba(255,255,255,0)");
+  grad.addColorStop(0.5, "rgba(255,255,255,0.28)");
+  grad.addColorStop(1, "rgba(255,255,255,0)");
+  ctx.fillStyle = grad;
+  ctx.fillRect(b.x0, b.y0, w, b.y1 - b.y0);
+}
+
+function drawQuadLabel(q, text) {
+  const cx = q.reduce((s, p) => s + p.x, 0) / 4;
+  const cy = q.reduce((s, p) => s + p.y, 0) / 4;
+  ctx.font = `600 ${Math.round(canvas.width / 55)}px -apple-system, sans-serif`;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.shadowColor = "rgba(0,0,0,0.7)";
+  ctx.shadowBlur = 8;
+  ctx.fillStyle = "rgba(255,255,255,0.95)";
+  ctx.fillText(text, cx, cy);
+  ctx.shadowBlur = 0;
+}
+
+// ---- AI generation (Gemini image-to-image) ----
+
+// Capture the framed region (bounding box of the quad, padded) as base64 JPEG.
+function captureQuadRegion(q) {
+  const w = canvas.width;
+  const h = canvas.height;
+  if (snap.width !== w || snap.height !== h) {
+    snap.width = w;
+    snap.height = h;
+  }
+  drawMirrored(snapCtx, w, h);
+
+  const b = quadBBox(q);
+  const pad = Math.max(b.x1 - b.x0, b.y1 - b.y0) * 0.08;
+  const x0 = Math.max(0, b.x0 - pad);
+  const y0 = Math.max(0, b.y0 - pad);
+  const cw = Math.min(w, b.x1 + pad) - x0;
+  const ch = Math.min(h, b.y1 + pad) - y0;
+
+  const maxSide = 768;
+  const scale = Math.min(1, maxSide / Math.max(cw, ch));
+  const out = document.createElement("canvas");
+  out.width = Math.max(64, Math.round(cw * scale));
+  out.height = Math.max(64, Math.round(ch * scale));
+  out.getContext("2d").drawImage(snap, x0, y0, cw, ch, 0, 0, out.width, out.height);
+  return out.toDataURL("image/jpeg", 0.85).split(",")[1];
+}
+
+async function generateAI(q) {
+  aiState = "generating";
+  aiError = "";
+  try {
+    const imageB64 = captureQuadRegion(q);
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${AI_MODEL}:generateContent`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-goog-api-key": apiKey,
+        },
+        body: JSON.stringify({
+          contents: [
+            {
+              parts: [
+                { text: AI_PROMPT },
+                { inline_data: { mime_type: "image/jpeg", data: imageB64 } },
+              ],
+            },
+          ],
+        }),
+      }
+    );
+    if (!res.ok) {
+      let detail = res.statusText;
+      try {
+        detail = (await res.json())?.error?.message || detail;
+      } catch {}
+      throw new Error(`${res.status}: ${detail.slice(0, 80)}`);
+    }
+    const data = await res.json();
+    const parts = data.candidates?.[0]?.content?.parts || [];
+    const imgPart = parts.find((p) => p.inlineData || p.inline_data);
+    if (!imgPart) throw new Error("no image returned — try again");
+    const inline = imgPart.inlineData || imgPart.inline_data;
+    const img = new Image();
+    img.src = `data:${inline.mimeType || inline.mime_type};base64,${inline.data}`;
+    await img.decode();
+    aiImage = img;
+    aiState = "ready";
+  } catch (err) {
+    console.error("AI generation failed:", err);
+    aiError = err.message;
+    aiState = "error";
+    // Let the error linger, then allow another attempt.
+    setTimeout(() => {
+      if (aiState === "error") aiState = "idle";
+    }, 4000);
+  }
+}
+
+// ---- Quad texture mapping (draws an image warped into the finger frame) ----
+
+// Order quad corners TL, TR, BR, BL so the texture maps upright.
+function orderForTexture(q) {
+  const s = [...q].sort((a, b) => a.y - b.y);
+  const top = s.slice(0, 2).sort((a, b) => a.x - b.x);
+  const bot = s.slice(2).sort((a, b) => a.x - b.x);
+  return [top[0], top[1], bot[1], bot[0]];
+}
+
+// Draw img into an arbitrary quad [TL, TR, BR, BL] using a subdivided grid of
+// affine-mapped triangles (bilinear surface — good enough at grid 6).
+function drawImageToQuad(c, img, quad, grid = 6) {
+  const surf = (u, v) => {
+    const top = lerpPt(quad[0], quad[1], u);
+    const bot = lerpPt(quad[3], quad[2], u);
+    return lerpPt(top, bot, v);
+  };
+  const iw = img.width;
+  const ih = img.height;
+  for (let i = 0; i < grid; i++) {
+    for (let j = 0; j < grid; j++) {
+      const u0 = i / grid, u1 = (i + 1) / grid;
+      const v0 = j / grid, v1 = (j + 1) / grid;
+      const p00 = surf(u0, v0), p10 = surf(u1, v0);
+      const p11 = surf(u1, v1), p01 = surf(u0, v1);
+      const uv00 = [u0 * iw, v0 * ih], uv10 = [u1 * iw, v0 * ih];
+      const uv11 = [u1 * iw, v1 * ih], uv01 = [u0 * iw, v1 * ih];
+      drawTexturedTriangle(c, img, [p00, p10, p11], [uv00, uv10, uv11]);
+      drawTexturedTriangle(c, img, [p00, p11, p01], [uv00, uv11, uv01]);
+    }
+  }
+}
+
+function drawTexturedTriangle(c, img, pts, uvs) {
+  const [[u0, v0], [u1, v1], [u2, v2]] = uvs;
+  const [p0, p1, p2] = pts;
+  const den = u0 * (v1 - v2) + u1 * (v2 - v0) + u2 * (v0 - v1);
+  if (!den) return;
+  const a = (p0.x * (v1 - v2) + p1.x * (v2 - v0) + p2.x * (v0 - v1)) / den;
+  const b = (p0.y * (v1 - v2) + p1.y * (v2 - v0) + p2.y * (v0 - v1)) / den;
+  const cc = (p0.x * (u2 - u1) + p1.x * (u0 - u2) + p2.x * (u1 - u0)) / den;
+  const d = (p0.y * (u2 - u1) + p1.y * (u0 - u2) + p2.y * (u1 - u0)) / den;
+  const e = p0.x - a * u0 - cc * v0;
+  const f = p0.y - b * u0 - d * v0;
+  // Clip to the triangle expanded ~0.7px outward so adjacent cells overlap
+  // and no hairline seams show between grid cells.
+  const cx = (p0.x + p1.x + p2.x) / 3;
+  const cy = (p0.y + p1.y + p2.y) / 3;
+  const ex = pts.map((p) => {
+    const dx = p.x - cx, dy = p.y - cy;
+    const len = Math.hypot(dx, dy) || 1;
+    return { x: p.x + (dx / len) * 0.7, y: p.y + (dy / len) * 0.7 };
+  });
+  c.save();
+  c.beginPath();
+  c.moveTo(ex[0].x, ex[0].y);
+  c.lineTo(ex[1].x, ex[1].y);
+  c.lineTo(ex[2].x, ex[2].y);
+  c.closePath();
+  c.clip();
+  c.transform(a, b, cc, d, e, f);
+  c.drawImage(img, 0, 0);
+  c.restore();
 }
 
 // ---- Toon: cel-shaded cartoon version of the live feed ----
@@ -416,6 +670,20 @@ function loop() {
       corners = corners.map((c, i) => lerpPt(c, matched[i], 0.4));
     }
     presence = Math.min(1, presence + 0.12);
+
+    // AI effect: trigger a generation once the frame is held steady.
+    if (effect === "ai" && apiKey && aiState === "idle" && !aiImage) {
+      if (lastRawQuad) {
+        const moved =
+          targetQuad.reduce((s, p, i) => s + dist(p, lastRawQuad[i]), 0) / 4;
+        stableFrames = moved < canvas.width * 0.01 ? stableFrames + 1 : 0;
+      }
+      if (stableFrames > 20) {
+        stableFrames = 0;
+        generateAI(corners);
+      }
+    }
+    lastRawQuad = targetQuad;
   } else if (corners && ++lostFrames <= MAX_LOST_FRAMES) {
     // Brief tracking dropout: hold the last quad instead of fading.
     presence = Math.min(1, presence + 0.12);
@@ -424,6 +692,11 @@ function loop() {
     if (presence === 0) {
       corners = null;
       frameActive = false;
+      // Frame fully dropped: clear the AI result so re-framing regenerates.
+      aiImage = null;
+      if (aiState === "ready" || aiState === "error") aiState = "idle";
+      stableFrames = 0;
+      lastRawQuad = null;
     }
   }
 

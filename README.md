@@ -39,6 +39,25 @@ Switch with the toolbar or keys 1–6:
 5. **Glitch** — chromatic aberration, slice displacement, scanlines
 6. **Toon** — cel-shaded cartoon version of the live feed: smoothed,
    posterized color bands + dark ink outlines from edge detection
+7. **AI ✨** — hold the frame steady for ~1 second and Gemini's image model
+   redraws the framed region as a 3D animated movie character, warped back
+   into your finger frame (requires an API key, see below)
+
+## AI effect setup (bring your own key)
+
+The AI effect uses Google's Gemini image model (`gemini-2.5-flash-image`)
+via image-to-image editing. Click the 🔑 button, paste a key from
+[Google AI Studio](https://aistudio.google.com/apikey), and select the
+AI ✨ effect.
+
+- Your key is stored only in your browser (localStorage if "remember" is
+  checked, sessionStorage otherwise) and sent only to
+  `generativelanguage.googleapis.com`.
+- Use a dedicated free-tier key without billing attached; optionally
+  restrict it by HTTP referrer in Google Cloud console.
+- Each generation is one image request (~$0.04 on paid tier, or free-tier
+  quota). A new generation triggers each time you re-form the frame after
+  fully dropping it.
 
 ## Demo mode (no camera)
 

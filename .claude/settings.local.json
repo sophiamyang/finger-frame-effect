@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git commit -m 'Finger frame effect: hand-tracked camera frame with live effects *)",
+      "Bash(git remote *)",
+      "Bash(git push *)",
+      "Bash(git rm *)",
+      "Bash(git commit *)",
+      "Bash(curl -s https://sophiamyang.github.io/finger-frame-effect/)"
+    ]
+  }
+}
