@@ -173,7 +173,9 @@ function computeQuad(hands) {
   }
   info.sort((a, b) => a.wristX - b.wristX);
   const [A, B] = info;
-  const pts = [A.index, B.thumb, B.index, A.thumb];
+  // Standard gesture holds both index fingers up and thumbs down, so this
+  // cycle traces a rectangle; flipping one hand crosses it into a bowtie.
+  const pts = [A.index, B.index, B.thumb, A.thumb];
   // Degenerate-frame gate on the spanned extent (angle-sorted area) — the
   // traced area is near zero for a legitimate crossed (bowtie) frame.
   const cx = pts.reduce((s, p) => s + p.x, 0) / 4;
@@ -722,9 +724,9 @@ function fakeHands(t) {
       { x: 0.75 + ox, y: 0.4 + oy }
     ),
     fakeHand(
-      { x: 0.26 - ox, y: 0.64 - oy },
-      { x: 0.2 - ox, y: 0.34 - oy },
-      { x: 0.25 - ox, y: 0.5 - oy }
+      { x: 0.26 - ox, y: 0.28 - oy },
+      { x: 0.2 - ox, y: 0.58 - oy },
+      { x: 0.25 - ox, y: 0.44 - oy }
     ),
   ];
 }
