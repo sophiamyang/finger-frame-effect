@@ -37,58 +37,8 @@ const EFFECTS = [
   { id: "glitch", label: "Glitch" },
   { id: "toon", label: "Toon" },
   { id: "vangogh", label: "Van Gogh" },
-  { id: "ai", label: "AI ✨" },
 ];
 
-// ---- AI effect (Gemini image-to-image) state ----
-const AI_MODEL = "gemini-2.5-flash-image";
-const AI_STYLES = {
-  movie3d:
-    "Transform the person in this image into a 3D animated movie character " +
-    "(stylized CGI animation look, expressive big eyes, soft lighting).",
-  anime:
-    "Redraw this image as a hand-drawn anime illustration with clean line " +
-    "art, cel shading, and vibrant colors.",
-  clay:
-    "Transform the person in this image into a claymation stop-motion clay " +
-    "character with visible clay texture.",
-  pixel:
-    "Redraw this image as detailed retro pixel art in a 16-bit video game style.",
-  watercolor:
-    "Repaint this image as a soft watercolor painting with loose brushwork " +
-    "and gentle color bleeds.",
-};
-// Always appended so the result stays registered with the live feed.
-const AI_PROMPT_SUFFIX =
-  " This is critical: preserve the EXACT position, scale, and framing of " +
-  "every element — the face, body, hands, and background must stay in " +
-  "precisely the same place and size as the original photo. Do not enlarge, " +
-  "recenter, zoom, or crop anything. Same pose, same expression, same " +
-  "clothing colors, same background. Return only the transformed image.";
-let aiStyle = localStorage.getItem("ai-style") || "movie3d";
-let aiCustomPrompt = localStorage.getItem("ai-style-custom") || "";
-
-function aiPrompt() {
-  const style =
-    aiStyle === "custom" && aiCustomPrompt.trim()
-      ? aiCustomPrompt.trim()
-      : AI_STYLES[aiStyle] || AI_STYLES.movie3d;
-  return style + AI_PROMPT_SUFFIX;
-}
-let apiKey =
-  localStorage.getItem("gemini-key") || sessionStorage.getItem("gemini-key") || "";
-let aiState = "idle"; // idle | generating | ready | error
-let aiImage = null;
-let aiError = "";
-let aiLastGen = 0;
-// Re-stylize every few seconds while the frame is held, so the window keeps
-// up as the person moves. Each refresh is one image request.
-const AI_REFRESH_MS = 6000;
-let stableFrames = 0;
-let lastRawQuad = null;
-// Full-res snapshot canvas for captures.
-const snap = document.createElement("canvas");
-const snapCtx = snap.getContext("2d");
 
 // Offscreen canvas for the toon effect (processed at reduced resolution).
 const toon = document.createElement("canvas");
@@ -135,57 +85,11 @@ function setEffect(id) {
   toolbar.querySelectorAll("button").forEach((b) => {
     b.classList.toggle("active", b.dataset.id === id);
   });
-  if (id === "ai" && !apiKey) {
-    document.getElementById("key-panel").classList.remove("hidden");
-  }
-}
-
-function setupKeyPanel() {
-  const btn = document.getElementById("key-btn");
-  const panel = document.getElementById("key-panel");
-  const input = document.getElementById("key-input");
-  const remember = document.getElementById("key-remember");
-  const styleSelect = document.getElementById("style-select");
-  const styleCustom = document.getElementById("style-custom");
-
-  input.value = apiKey;
-  remember.checked = !!localStorage.getItem("gemini-key");
-  styleSelect.value = aiStyle;
-  styleCustom.value = aiCustomPrompt;
-  styleCustom.classList.toggle("hidden", aiStyle !== "custom");
-
-  btn.addEventListener("click", () => panel.classList.toggle("hidden"));
-  styleSelect.addEventListener("change", () => {
-    styleCustom.classList.toggle("hidden", styleSelect.value !== "custom");
-  });
-  document.getElementById("key-save").addEventListener("click", () => {
-    apiKey = input.value.trim();
-    localStorage.removeItem("gemini-key");
-    sessionStorage.removeItem("gemini-key");
-    if (apiKey) {
-      (remember.checked ? localStorage : sessionStorage).setItem("gemini-key", apiKey);
-    }
-    aiStyle = styleSelect.value;
-    aiCustomPrompt = styleCustom.value;
-    localStorage.setItem("ai-style", aiStyle);
-    localStorage.setItem("ai-style-custom", aiCustomPrompt);
-    // New style means the cached result is stale — regenerate on next framing.
-    aiImage = null;
-    aiState = "idle";
-    aiError = "";
-    panel.classList.add("hidden");
-  });
-  document.getElementById("key-clear").addEventListener("click", () => {
-    apiKey = "";
-    input.value = "";
-    localStorage.removeItem("gemini-key");
-    sessionStorage.removeItem("gemini-key");
-  });
 }
 
 async function init() {
   buildToolbar();
-  setupKeyPanel();
+
 
   let stream;
   if (DEMO) {
@@ -387,27 +291,6 @@ function applyEffect(q) {
       drawVanGogh(q, w, h);
       break;
     }
-    case "ai": {
-      if (aiImage) {
-        // The stylized image is a full-frame render aligned with the camera
-        // feed — draw it screen-aligned so the finger frame acts as a window
-        // revealing it, staying registered with the real scene as hands move.
-        ctx.drawImage(aiImage, 0, 0, w, h);
-      } else {
-        // Waiting / generating: blurred feed + shimmer sweep + status text.
-        ctx.filter = "blur(10px) brightness(0.85) saturate(1.1)";
-        drawMirrored(ctx, w, h);
-        ctx.filter = "none";
-        drawShimmer(q);
-        let label;
-        if (!apiKey) label = "🔑 Add your Gemini key (top right)";
-        else if (aiState === "generating") label = "✨ Dreaming you up…";
-        else if (aiState === "error") label = "⚠️ " + aiError;
-        else label = "✨ Hold the frame steady…";
-        drawQuadLabel(q, label);
-      }
-      break;
-    }
   }
 
   ctx.restore();
@@ -424,119 +307,23 @@ function quadBBox(q) {
   };
 }
 
-function drawShimmer(q) {
-  const b = quadBBox(q);
-  const w = b.x1 - b.x0;
-  const t = (performance.now() / 1400) % 1;
-  const gx = b.x0 - w * 0.3 + t * w * 1.6;
-  const grad = ctx.createLinearGradient(gx - w * 0.2, 0, gx + w * 0.2, 0);
-  grad.addColorStop(0, "rgba(255,255,255,0)");
-  grad.addColorStop(0.5, "rgba(255,255,255,0.28)");
-  grad.addColorStop(1, "rgba(255,255,255,0)");
-  ctx.fillStyle = grad;
-  ctx.fillRect(b.x0, b.y0, w, b.y1 - b.y0);
-}
-
-function drawQuadLabel(q, text) {
-  const cx = q.reduce((s, p) => s + p.x, 0) / 4;
-  const cy = q.reduce((s, p) => s + p.y, 0) / 4;
-  ctx.font = `600 ${Math.round(canvas.width / 55)}px -apple-system, sans-serif`;
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-  ctx.shadowColor = "rgba(0,0,0,0.7)";
-  ctx.shadowBlur = 8;
-  ctx.fillStyle = "rgba(255,255,255,0.95)";
-  ctx.fillText(text, cx, cy);
-  ctx.shadowBlur = 0;
-}
-
-// ---- AI generation (Gemini image-to-image) ----
-
-// Capture the entire (mirrored) camera frame as base64 JPEG. The whole scene
-// is stylized so the result stays aligned with the feed and the finger frame
-// can act as a moving window over it.
-function captureFrame() {
-  const w = canvas.width;
-  const h = canvas.height;
-  const maxSide = 1024;
-  const scale = Math.min(1, maxSide / Math.max(w, h));
-  const outW = Math.round(w * scale);
-  const outH = Math.round(h * scale);
-  if (snap.width !== outW || snap.height !== outH) {
-    snap.width = outW;
-    snap.height = outH;
-  }
-  drawMirrored(snapCtx, outW, outH);
-  return snap.toDataURL("image/jpeg", 0.85).split(",")[1];
-}
-
-async function generateAI() {
-  aiState = "generating";
-  aiError = "";
-  aiLastGen = performance.now();
-  try {
-    const imageB64 = captureFrame();
-    const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${AI_MODEL}:generateContent`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-goog-api-key": apiKey,
-        },
-        body: JSON.stringify({
-          contents: [
-            {
-              parts: [
-                { text: aiPrompt() },
-                { inline_data: { mime_type: "image/jpeg", data: imageB64 } },
-              ],
-            },
-          ],
-        }),
-      }
-    );
-    if (!res.ok) {
-      let detail = res.statusText;
-      try {
-        detail = (await res.json())?.error?.message || detail;
-      } catch {}
-      throw new Error(`${res.status}: ${detail.slice(0, 80)}`);
-    }
-    const data = await res.json();
-    const parts = data.candidates?.[0]?.content?.parts || [];
-    const imgPart = parts.find((p) => p.inlineData || p.inline_data);
-    if (!imgPart) throw new Error("no image returned — try again");
-    const inline = imgPart.inlineData || imgPart.inline_data;
-    const img = new Image();
-    img.src = `data:${inline.mimeType || inline.mime_type};base64,${inline.data}`;
-    await img.decode();
-    aiImage = img;
-    aiState = "ready";
-  } catch (err) {
-    console.error("AI generation failed:", err);
-    // If a refresh failed but we still have a previous result, keep showing
-    // it and retry quietly on the next refresh cycle.
-    if (aiImage) {
-      aiState = "ready";
-      return;
-    }
-    aiError = err.message;
-    aiState = "error";
-    // Let the error linger, then allow another attempt.
-    setTimeout(() => {
-      if (aiState === "error") aiState = "idle";
-    }, 4000);
-  }
-}
-
 // ---- Van Gogh: live painterly rendering, no AI ----
-// Classic stroke-based rendering: short brush strokes oriented along image
-// edges (tangent to the gradient), with gentle swirls in flat areas and a
-// saturated, posterized palette. Runs per-frame, so it moves with you.
+// Hertzmann-style stroke-based rendering, adapted for real time:
+//   1. Build a SMOOTHED orientation field from the image gradients (this is
+//      what makes strokes flow coherently instead of jittering per-pixel).
+//   2. Paint curved brush strokes that follow the field — a large-brush pass
+//      for mass, then a fine pass that sharpens edges — with per-stroke
+//      color jitter for the impasto feel. Flat areas fall back to a slowly
+//      drifting swirl field (the Starry Night signature).
+// All computed per frame, so the painting moves with the subject.
 const vg = document.createElement("canvas");
 const vgCtx = vg.getContext("2d", { willReadFrequently: true });
 const VG_SCALE = 4;
+let vgAngle = null;
+let vgMag = null;
+let vgData = null;
+let vgW = 0;
+let vgH = 0;
 
 function vgHash(x, y) {
   // Deterministic per-position jitter so strokes don't shimmer frame to frame.
@@ -544,84 +331,175 @@ function vgHash(x, y) {
   return n - Math.floor(n);
 }
 
-function drawVanGogh(q, w, h) {
-  const sw = Math.ceil(w / VG_SCALE);
-  const sh = Math.ceil(h / VG_SCALE);
-  if (vg.width !== sw || vg.height !== sh) {
-    vg.width = sw;
-    vg.height = sh;
+// Sample the image + build the smoothed flow field for this frame.
+function vgBuildField(w, h) {
+  vgW = Math.ceil(w / VG_SCALE);
+  vgH = Math.ceil(h / VG_SCALE);
+  if (vg.width !== vgW || vg.height !== vgH) {
+    vg.width = vgW;
+    vg.height = vgH;
   }
-  vgCtx.filter = "saturate(1.9) contrast(1.15)";
-  drawMirrored(vgCtx, sw, sh);
+  vgCtx.filter = "saturate(1.8) contrast(1.1)";
+  drawMirrored(vgCtx, vgW, vgH);
   vgCtx.filter = "none";
-  const d = vgCtx.getImageData(0, 0, sw, sh).data;
+  vgData = vgCtx.getImageData(0, 0, vgW, vgH).data;
 
-  const lum = new Float32Array(sw * sh);
-  for (let i = 0, p = 0; i < lum.length; i++, p += 4) {
-    lum[i] = 0.299 * d[p] + 0.587 * d[p + 1] + 0.114 * d[p + 2];
+  const n = vgW * vgH;
+  const lum = new Float32Array(n);
+  for (let i = 0, p = 0; i < n; i++, p += 4) {
+    lum[i] = 0.299 * vgData[p] + 0.587 * vgData[p + 1] + 0.114 * vgData[p + 2];
   }
 
-  // Underpainting so gaps between strokes read as canvas, not raw video.
-  ctx.filter = "blur(8px) saturate(1.8) brightness(0.9)";
+  // Sobel gradients.
+  const gx = new Float32Array(n);
+  const gy = new Float32Array(n);
+  for (let y = 1; y < vgH - 1; y++) {
+    for (let x = 1; x < vgW - 1; x++) {
+      const i = y * vgW + x;
+      gx[i] =
+        -lum[i - vgW - 1] - 2 * lum[i - 1] - lum[i + vgW - 1] +
+        lum[i - vgW + 1] + 2 * lum[i + 1] + lum[i + vgW + 1];
+      gy[i] =
+        -lum[i - vgW - 1] - 2 * lum[i - vgW] - lum[i - vgW + 1] +
+        lum[i + vgW - 1] + 2 * lum[i + vgW] + lum[i + vgW + 1];
+    }
+  }
+
+  // Smooth the gradient field (separable box blur, radius 2) so stroke
+  // directions are coherent across neighbouring strokes.
+  const tmpx = new Float32Array(n);
+  const tmpy = new Float32Array(n);
+  const R = 2;
+  for (let y = 0; y < vgH; y++) {
+    const row = y * vgW;
+    for (let x = 0; x < vgW; x++) {
+      let sx = 0, sy = 0, c = 0;
+      for (let k = -R; k <= R; k++) {
+        const xx = x + k;
+        if (xx < 0 || xx >= vgW) continue;
+        sx += gx[row + xx];
+        sy += gy[row + xx];
+        c++;
+      }
+      tmpx[row + x] = sx / c;
+      tmpy[row + x] = sy / c;
+    }
+  }
+  vgAngle = vgAngle && vgAngle.length === n ? vgAngle : new Float32Array(n);
+  vgMag = vgMag && vgMag.length === n ? vgMag : new Float32Array(n);
+  for (let x = 0; x < vgW; x++) {
+    for (let y = 0; y < vgH; y++) {
+      let sx = 0, sy = 0, c = 0;
+      for (let k = -R; k <= R; k++) {
+        const yy = y + k;
+        if (yy < 0 || yy >= vgH) continue;
+        sx += tmpx[yy * vgW + x];
+        sy += tmpy[yy * vgW + x];
+        c++;
+      }
+      const i = y * vgW + x;
+      const fx = sx / c;
+      const fy = sy / c;
+      vgMag[i] = Math.hypot(fx, fy);
+      vgAngle[i] = Math.atan2(fy, fx) + Math.PI / 2;
+    }
+  }
+}
+
+// Field angle at full-res coords, with swirl fallback in flat areas.
+function vgFieldAngle(px, py, t) {
+  const sx = Math.min(vgW - 1, Math.max(0, Math.round(px / VG_SCALE)));
+  const sy = Math.min(vgH - 1, Math.max(0, Math.round(py / VG_SCALE)));
+  const i = sy * vgW + sx;
+  if (vgMag[i] > 14) return vgAngle[i];
+  return (
+    Math.sin(px * 0.011 + t * 0.35) * 1.7 +
+    Math.cos(py * 0.013 - t * 0.28) * 1.7
+  );
+}
+
+// Paint one curved stroke following the flow field.
+function vgStroke(px, py, segments, segLen, t) {
+  ctx.beginPath();
+  ctx.moveTo(px, py);
+  let a = vgFieldAngle(px, py, t);
+  let x = px;
+  let y = py;
+  for (let s = 0; s < segments; s++) {
+    const na = vgFieldAngle(x, y, t);
+    // Keep direction continuous — a field angle is orientation-only, so flip
+    // it when it points backwards relative to where the stroke is heading.
+    a = Math.cos(na - a) < 0 ? na + Math.PI : na;
+    x += Math.cos(a) * segLen;
+    y += Math.sin(a) * segLen;
+    ctx.lineTo(x, y);
+  }
+  ctx.stroke();
+}
+
+function vgColor(px, py, jitter) {
+  const sx = Math.min(vgW - 1, Math.max(0, Math.round(px / VG_SCALE)));
+  const sy = Math.min(vgH - 1, Math.max(0, Math.round(py / VG_SCALE)));
+  const p = (sy * vgW + sx) * 4;
+  // Per-stroke value jitter sells distinct paint dabs.
+  const v = 1 + (jitter - 0.5) * 0.3;
+  const r = Math.min(255, vgData[p] * v);
+  const g = Math.min(255, vgData[p + 1] * v);
+  const b = Math.min(255, vgData[p + 2] * (1 + (jitter - 0.5) * 0.22));
+  return `rgb(${r | 0},${g | 0},${b | 0})`;
+}
+
+function vgMagAt(px, py) {
+  const sx = Math.min(vgW - 1, Math.max(0, Math.round(px / VG_SCALE)));
+  const sy = Math.min(vgH - 1, Math.max(0, Math.round(py / VG_SCALE)));
+  return vgMag[sy * vgW + sx];
+}
+
+function drawVanGogh(q, w, h) {
+  vgBuildField(w, h);
+
+  // Underpainting so gaps between strokes read as toned canvas.
+  ctx.filter = "blur(10px) saturate(1.7) brightness(0.92)";
   drawMirrored(ctx, w, h);
   ctx.filter = "none";
 
-  // Brush strokes over the framed region only (perf: skip the rest).
   const b = quadBBox(q);
-  const x0 = Math.max(8, b.x0);
-  const y0 = Math.max(8, b.y0);
-  const x1 = Math.min(w - 8, b.x1);
-  const y1 = Math.min(h - 8, b.y1);
-  const step = 7;
+  const x0 = Math.max(6, b.x0);
+  const y0 = Math.max(6, b.y0);
+  const x1 = Math.min(w - 6, b.x1);
+  const y1 = Math.min(h - 6, b.y1);
   const t = performance.now() / 1000;
   ctx.lineCap = "round";
+  ctx.lineJoin = "round";
 
-  for (let y = y0; y < y1; y += step) {
-    for (let x = x0; x < x1; x += step) {
-      const jr = vgHash(x, y);
-      const px = x + (jr - 0.5) * step;
-      const py = y + (vgHash(y, x) - 0.5) * step;
-      const sx = Math.min(sw - 2, Math.max(1, Math.round(px / VG_SCALE)));
-      const sy = Math.min(sh - 2, Math.max(1, Math.round(py / VG_SCALE)));
-      const i = sy * sw + sx;
+  // Pass 1 — large brush: lays down the mass of the painting.
+  const bigStep = 14;
+  for (let y = y0; y < y1; y += bigStep) {
+    for (let x = x0; x < x1; x += bigStep) {
+      const j = vgHash(x, y);
+      const px = x + (j - 0.5) * bigStep;
+      const py = y + (vgHash(y, x) - 0.5) * bigStep;
+      ctx.strokeStyle = vgColor(px, py, j);
+      ctx.lineWidth = 8 + j * 4;
+      ctx.globalAlpha = presence * 0.85;
+      vgStroke(px, py, 4, 6.5, t);
+    }
+  }
 
-      // Sobel gradient on luminance.
-      const gx =
-        -lum[i - sw - 1] - 2 * lum[i - 1] - lum[i + sw - 1] +
-        lum[i - sw + 1] + 2 * lum[i + 1] + lum[i + sw + 1];
-      const gy =
-        -lum[i - sw - 1] - 2 * lum[i - sw] - lum[i - sw + 1] +
-        lum[i + sw - 1] + 2 * lum[i + sw] + lum[i + sw + 1];
-      const mag = Math.hypot(gx, gy);
-
-      // Stroke along the edge tangent; in flat areas, follow a slow swirl
-      // field (the Van Gogh signature) that drifts gently over time.
-      let angle;
-      if (mag > 24) {
-        angle = Math.atan2(gy, gx) + Math.PI / 2;
-      } else {
-        angle =
-          Math.sin(px * 0.012 + t * 0.4) * 1.6 +
-          Math.cos(py * 0.011 - t * 0.3) * 1.6 +
-          jr * 0.8;
-      }
-
-      const p = i * 4;
-      const r = posterLUT[d[p]];
-      const g = posterLUT[d[p + 1]];
-      const bl = posterLUT[d[p + 2]];
-      // Longer, thinner strokes in flat areas; short dabs on edges.
-      const len = mag > 24 ? 8 + jr * 5 : 13 + jr * 7;
-      const dx = (Math.cos(angle) * len) / 2;
-      const dy = (Math.sin(angle) * len) / 2;
-
-      ctx.strokeStyle = `rgb(${r},${g},${bl})`;
-      ctx.lineWidth = 3.5 + jr * 2.5;
-      ctx.globalAlpha = presence * 0.9;
-      ctx.beginPath();
-      ctx.moveTo(px - dx, py - dy);
-      ctx.lineTo(px + dx, py + dy);
-      ctx.stroke();
+  // Pass 2 — fine brush: sharpens edges and adds dab texture. Denser on
+  // edges, sparser in flat areas so the big swirls still show through.
+  const fineStep = 6;
+  for (let y = y0; y < y1; y += fineStep) {
+    for (let x = x0; x < x1; x += fineStep) {
+      const j = vgHash(x + 7, y + 3);
+      const px = x + (j - 0.5) * fineStep;
+      const py = y + (vgHash(y + 5, x + 1) - 0.5) * fineStep;
+      const onEdge = vgMagAt(px, py) > 20;
+      if (!onEdge && j > 0.35) continue;
+      ctx.strokeStyle = vgColor(px, py, vgHash(x, y + 11));
+      ctx.lineWidth = onEdge ? 3 + j * 1.5 : 4 + j * 2;
+      ctx.globalAlpha = presence * (onEdge ? 0.95 : 0.7);
+      vgStroke(px, py, onEdge ? 2 : 3, 5, t);
     }
   }
   ctx.globalAlpha = presence;
@@ -754,26 +632,6 @@ function loop() {
       corners = corners.map((c, i) => lerpPt(c, matched[i], 0.4));
     }
     presence = Math.min(1, presence + 0.12);
-
-    // AI effect: generate once the frame is held steady, then keep
-    // refreshing periodically so the stylized layer tracks the person.
-    if (effect === "ai" && apiKey && aiState !== "generating" && aiState !== "error") {
-      if (lastRawQuad) {
-        const moved =
-          targetQuad.reduce((s, p, i) => s + dist(p, lastRawQuad[i]), 0) / 4;
-        stableFrames = moved < canvas.width * 0.01 ? stableFrames + 1 : 0;
-      }
-      const needFirst = !aiImage && stableFrames > 20;
-      const needRefresh =
-        aiImage &&
-        stableFrames > 5 &&
-        performance.now() - aiLastGen > AI_REFRESH_MS;
-      if (needFirst || needRefresh) {
-        stableFrames = 0;
-        generateAI();
-      }
-    }
-    lastRawQuad = targetQuad;
   } else if (corners && ++lostFrames <= MAX_LOST_FRAMES) {
     // Brief tracking dropout: hold the last quad instead of fading.
     presence = Math.min(1, presence + 0.12);
@@ -782,11 +640,6 @@ function loop() {
     if (presence === 0) {
       corners = null;
       frameActive = false;
-      // Frame fully dropped: clear the AI result so re-framing regenerates.
-      aiImage = null;
-      if (aiState === "ready" || aiState === "error") aiState = "idle";
-      stableFrames = 0;
-      lastRawQuad = null;
     }
   }
 

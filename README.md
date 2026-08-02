@@ -33,7 +33,7 @@ Then open http://localhost:8123 in a browser and allow camera access.
 
 ## Effects
 
-Switch with the toolbar or keys 1–8:
+Switch with the toolbar or keys 1–7:
 
 1. **Pixelate** — mosaic censor effect (downscale + nearest-neighbor upscale)
 2. **Blur** — frosted-glass blur
@@ -42,32 +42,11 @@ Switch with the toolbar or keys 1–8:
 5. **Glitch** — chromatic aberration, slice displacement, scanlines
 6. **Toon** — cel-shaded cartoon version of the live feed: smoothed,
    posterized color bands + dark ink outlines from edge detection
-7. **Van Gogh** — live painterly rendering with no AI: brush strokes
-   oriented along image edges, swirl fields in flat areas, saturated
-   posterized palette. Computed per-frame, so it moves with you in real time
-8. **AI ✨** — hold the frame steady for ~1 second and Gemini's image model
-   redraws the framed region as a 3D animated movie character, warped back
-   into your finger frame (requires an API key, see below)
-
-## AI effect setup (bring your own key)
-
-The AI effect uses Google's Gemini image model (`gemini-2.5-flash-image`)
-via image-to-image editing. Click the 🔑 button, paste a key from
-[Google AI Studio](https://aistudio.google.com/apikey), and select the
-AI ✨ effect.
-
-- Your key is stored only in your browser (localStorage if "remember" is
-  checked, sessionStorage otherwise) and sent only to
-  `generativelanguage.googleapis.com`.
-- Use a dedicated free-tier key without billing attached; optionally
-  restrict it by HTTP referrer in Google Cloud console.
-- Each generation is one image request (~$0.04 on paid tier, or free-tier
-  quota). A new generation triggers each time you re-form the frame after
-  fully dropping it.
-- Pick a style in the 🔑 panel — 3D animated movie (default), anime,
-  claymation, pixel art, watercolor, or write a fully custom prompt. A
-  "keep the same pose and framing" suffix is always appended so the result
-  maps cleanly back into the finger frame.
+7. **Van Gogh** — live painterly rendering (no AI): a smoothed orientation
+   field is built from the image gradients each frame, then curved brush
+   strokes follow it in two passes — a large brush for mass, a fine brush
+   that sharpens edges — with per-stroke color jitter and slowly drifting
+   swirl fields in flat areas. Moves with you in real time.
 
 ## Demo mode (no camera)
 

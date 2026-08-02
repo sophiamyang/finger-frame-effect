@@ -80,96 +80,6 @@
       50% { transform: translateY(-5px); }
     }
 
-    #key-btn {
-      position: fixed;
-      top: 16px;
-      right: 16px;
-      z-index: 7;
-      appearance: none;
-      border: 1px solid rgba(255,255,255,0.12);
-      background: rgba(20,20,24,0.72);
-      backdrop-filter: blur(12px);
-      border-radius: 12px;
-      font-size: 18px;
-      padding: 8px 12px;
-      cursor: pointer;
-      transition: background 0.15s;
-    }
-    #key-btn:hover { background: rgba(255,255,255,0.1); }
-
-    #key-panel {
-      position: fixed;
-      top: 64px;
-      right: 16px;
-      width: 320px;
-      max-width: calc(100vw - 32px);
-      z-index: 8;
-      background: rgba(24,24,30,0.95);
-      backdrop-filter: blur(16px);
-      border: 1px solid rgba(255,255,255,0.12);
-      border-radius: 16px;
-      padding: 18px;
-      color: #eee;
-      transition: opacity 0.2s, transform 0.2s;
-    }
-    #key-panel.hidden {
-      opacity: 0;
-      transform: translateY(-8px);
-      pointer-events: none;
-    }
-    #key-panel h3 { font-size: 15px; margin-bottom: 8px; }
-    #key-panel select, #key-panel textarea {
-      width: 100%;
-      padding: 8px 10px;
-      border-radius: 8px;
-      border: 1px solid rgba(255,255,255,0.15);
-      background: rgba(0,0,0,0.35);
-      color: #eee;
-      font-size: 13px;
-      margin-bottom: 10px;
-      font-family: inherit;
-      resize: vertical;
-    }
-    #key-panel select option { background: #1a1a20; }
-    #key-panel textarea.hidden { display: none; }
-    #key-panel p { font-size: 12.5px; color: rgba(255,255,255,0.7); line-height: 1.5; margin-bottom: 10px; }
-    #key-panel a { color: #8ab4ff; }
-    #key-panel input[type="password"], #key-panel input[type="text"] {
-      width: 100%;
-      padding: 8px 10px;
-      border-radius: 8px;
-      border: 1px solid rgba(255,255,255,0.15);
-      background: rgba(0,0,0,0.35);
-      color: #eee;
-      font-size: 13px;
-      margin-bottom: 10px;
-      font-family: ui-monospace, monospace;
-    }
-    #key-panel .remember {
-      display: flex;
-      align-items: center;
-      gap: 7px;
-      font-size: 12.5px;
-      color: rgba(255,255,255,0.75);
-      margin-bottom: 12px;
-      cursor: pointer;
-    }
-    #key-panel .row { display: flex; gap: 8px; margin-bottom: 10px; }
-    #key-panel .row button {
-      flex: 1;
-      appearance: none;
-      border: none;
-      border-radius: 9px;
-      padding: 8px 0;
-      font-size: 13px;
-      font-weight: 600;
-      cursor: pointer;
-      font-family: inherit;
-    }
-    #key-save { background: #fff; color: #111; }
-    #key-clear { background: rgba(255,255,255,0.1); color: rgba(255,255,255,0.8); }
-    #key-panel .note { font-size: 11.5px; color: rgba(255,255,255,0.45); margin-bottom: 0; }
-
     #toolbar {
       position: fixed;
       left: 50%;
@@ -229,40 +139,6 @@
   </div>
 
   <div id="toolbar"></div>
-
-  <button id="key-btn" title="Gemini API key">🔑</button>
-  <div id="key-panel" class="hidden">
-    <h3>Gemini API key</h3>
-    <p>
-      The <strong>AI ✨</strong> effect turns you into an animated character using
-      Google's Gemini image model. Get a free key at
-      <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">Google AI Studio</a>.
-    </p>
-    <input id="key-input" type="password" placeholder="AIza…" autocomplete="off" />
-    <label class="remember">
-      <input type="checkbox" id="key-remember" /> Remember on this device
-    </label>
-    <h3>Style</h3>
-    <select id="style-select">
-      <option value="movie3d">3D animated movie</option>
-      <option value="anime">Anime</option>
-      <option value="clay">Claymation</option>
-      <option value="pixel">Pixel art</option>
-      <option value="watercolor">Watercolor</option>
-      <option value="custom">Custom prompt…</option>
-    </select>
-    <textarea id="style-custom" rows="3"
-      placeholder="Describe the transformation, e.g. 'Turn the person into a marble statue'"
-      class="hidden"></textarea>
-    <div class="row">
-      <button id="key-save">Save</button>
-      <button id="key-clear">Clear</button>
-    </div>
-    <p class="note">
-      Your key stays in your browser and is sent only to Google's API. Use a
-      dedicated free-tier key without billing attached.
-    </p>
-  </div>
 
   <script type="module" src="main.js"></script>
 </body>
