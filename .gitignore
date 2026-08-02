@@ -1,2 +1,16 @@
+# Tooling
 .claude/
+.vscode/
+.idea/
+
+# OS
 .DS_Store
+Thumbs.db
+
+# Node (if build tooling is ever added)
+node_modules/
+package-lock.json
+
+# Logs & temp
+*.log
+*.tmp
