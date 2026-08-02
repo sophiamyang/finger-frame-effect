@@ -59,11 +59,11 @@ let frameActive = false;
 // Frames since the quad was last seen; short dropouts hold the last quad.
 let lostFrames = 0;
 // Crossing/overlapping hands often occlude each other and break detection
-// for a while — hold the last quad through a generous dropout window.
-const MAX_LOST_FRAMES = 40;
+// for a while — hold the last quad through a moderate dropout window.
+const MAX_LOST_FRAMES = 25;
 // Frames in a row a far-jumped quad must persist before we accept it as a
 // real reposition rather than a mis-detection during hand overlap.
-const JUMP_CONFIRM_FRAMES = 5;
+const JUMP_CONFIRM_FRAMES = 2;
 let jumpFrames = 0;
 
 let landmarker = null;
@@ -320,6 +320,13 @@ let vgMag = null;
 let vgData = null;
 let vgW = 0;
 let vgH = 0;
+// Scratch buffers reused across frames — allocating these per frame caused
+// ~1MB/frame of garbage and visible GC stutter.
+let vgLum = null;
+let vgGx = null;
+let vgGy = null;
+let vgTx = null;
+let vgTy = null;
 
 function vgHash(x, y) {
   // Deterministic per-position jitter so strokes don't shimmer frame to frame.
@@ -327,8 +334,9 @@ function vgHash(x, y) {
   return n - Math.floor(n);
 }
 
-// Sample the image + build the smoothed flow field for this frame.
-function vgBuildField(w, h) {
+// Sample the image + build the smoothed flow field, computed only over the
+// framed region (padded) — the rest of the image never grows strokes.
+function vgBuildField(w, h, bb) {
   vgW = Math.ceil(w / VG_SCALE);
   vgH = Math.ceil(h / VG_SCALE);
   if (vg.width !== vgW || vg.height !== vgH) {
@@ -341,16 +349,35 @@ function vgBuildField(w, h) {
   vgData = vgCtx.getImageData(0, 0, vgW, vgH).data;
 
   const n = vgW * vgH;
-  const lum = new Float32Array(n);
-  for (let i = 0, p = 0; i < n; i++, p += 4) {
-    lum[i] = 0.299 * vgData[p] + 0.587 * vgData[p + 1] + 0.114 * vgData[p + 2];
+  if (!vgLum || vgLum.length !== n) {
+    vgLum = new Float32Array(n);
+    vgGx = new Float32Array(n);
+    vgGy = new Float32Array(n);
+    vgTx = new Float32Array(n);
+    vgTy = new Float32Array(n);
+    vgAngle = new Float32Array(n);
+    vgMag = new Float32Array(n);
+  }
+  const lum = vgLum, gx = vgGx, gy = vgGy, tmpx = vgTx, tmpy = vgTy;
+
+  // Cell range covering the padded bbox (clamped one cell inside the border).
+  const M = 4;
+  const cx0 = Math.max(1, Math.floor(bb.x0 / VG_SCALE) - M);
+  const cx1 = Math.min(vgW - 2, Math.ceil(bb.x1 / VG_SCALE) + M);
+  const cy0 = Math.max(1, Math.floor(bb.y0 / VG_SCALE) - M);
+  const cy1 = Math.min(vgH - 2, Math.ceil(bb.y1 / VG_SCALE) + M);
+
+  for (let y = cy0 - 1; y <= cy1 + 1; y++) {
+    for (let x = cx0 - 1; x <= cx1 + 1; x++) {
+      const i = y * vgW + x;
+      const p = i * 4;
+      lum[i] = 0.299 * vgData[p] + 0.587 * vgData[p + 1] + 0.114 * vgData[p + 2];
+    }
   }
 
   // Sobel gradients.
-  const gx = new Float32Array(n);
-  const gy = new Float32Array(n);
-  for (let y = 1; y < vgH - 1; y++) {
-    for (let x = 1; x < vgW - 1; x++) {
+  for (let y = cy0; y <= cy1; y++) {
+    for (let x = cx0; x <= cx1; x++) {
       const i = y * vgW + x;
       gx[i] =
         -lum[i - vgW - 1] - 2 * lum[i - 1] - lum[i + vgW - 1] +
@@ -363,16 +390,14 @@ function vgBuildField(w, h) {
 
   // Smooth the gradient field (separable box blur, radius 2) so stroke
   // directions are coherent across neighbouring strokes.
-  const tmpx = new Float32Array(n);
-  const tmpy = new Float32Array(n);
   const R = 2;
-  for (let y = 0; y < vgH; y++) {
+  for (let y = cy0; y <= cy1; y++) {
     const row = y * vgW;
-    for (let x = 0; x < vgW; x++) {
+    for (let x = cx0; x <= cx1; x++) {
       let sx = 0, sy = 0, c = 0;
       for (let k = -R; k <= R; k++) {
         const xx = x + k;
-        if (xx < 0 || xx >= vgW) continue;
+        if (xx < cx0 || xx > cx1) continue;
         sx += gx[row + xx];
         sy += gy[row + xx];
         c++;
@@ -381,14 +406,12 @@ function vgBuildField(w, h) {
       tmpy[row + x] = sy / c;
     }
   }
-  vgAngle = vgAngle && vgAngle.length === n ? vgAngle : new Float32Array(n);
-  vgMag = vgMag && vgMag.length === n ? vgMag : new Float32Array(n);
-  for (let x = 0; x < vgW; x++) {
-    for (let y = 0; y < vgH; y++) {
+  for (let x = cx0; x <= cx1; x++) {
+    for (let y = cy0; y <= cy1; y++) {
       let sx = 0, sy = 0, c = 0;
       for (let k = -R; k <= R; k++) {
         const yy = y + k;
-        if (yy < 0 || yy >= vgH) continue;
+        if (yy < cy0 || yy > cy1) continue;
         sx += tmpx[yy * vgW + x];
         sy += tmpy[yy * vgW + x];
         c++;
@@ -452,7 +475,7 @@ function vgMagAt(px, py) {
 }
 
 function drawVanGogh(q, w, h) {
-  vgBuildField(w, h);
+  vgBuildField(w, h, quadBBox(q));
 
   // Underpainting so gaps between strokes read as toned canvas.
   ctx.filter = "blur(10px) saturate(1.7) brightness(0.92)";
@@ -632,7 +655,9 @@ function loop() {
         matched.reduce((s, p, i) => s + dist(p, corners[i]), 0) / 4;
       // Occluded/crossing hands produce wild one-frame mis-detections.
       // Ignore a far-jumped quad unless it persists — then it's a real move.
-      if (moved > canvas.width * 0.18 && ++jumpFrames < JUMP_CONFIRM_FRAMES) {
+      // Only quads that genuinely teleport (≥30% of the screen in one frame,
+      // beyond any real hand motion) are treated as suspect mis-detections.
+      if (moved > canvas.width * 0.3 && ++jumpFrames < JUMP_CONFIRM_FRAMES) {
         if (++lostFrames > MAX_LOST_FRAMES) {
           presence = Math.max(0, presence - 0.05);
         }
@@ -640,9 +665,13 @@ function loop() {
         lostFrames = 0;
         frameActive = true;
         jumpFrames = 0;
-        // Adaptive smoothing: follow briskly for normal motion, heavily
-        // damped for large deltas so glitches read as a wobble, not a snap.
-        const alpha = moved > canvas.width * 0.08 ? 0.15 : 0.4;
+        // Velocity-adaptive smoothing (One Euro-style): damp pixel jitter
+        // when the hands are nearly still, follow at high gain the moment
+        // they genuinely move so the frame feels glued to the fingers.
+        const alpha = Math.min(
+          0.85,
+          Math.max(0.35, moved / (canvas.width * 0.05))
+        );
         corners = corners.map((c, i) => lerpPt(c, matched[i], alpha));
         presence = Math.min(1, presence + 0.12);
       }
