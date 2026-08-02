@@ -39,7 +39,6 @@ const EFFECTS = [
   { id: "vangogh", label: "Van Gogh" },
 ];
 
-
 // Offscreen canvas for the toon effect (processed at reduced resolution).
 const toon = document.createElement("canvas");
 const tctx = toon.getContext("2d", { willReadFrequently: true });
@@ -95,7 +94,6 @@ function setEffect(id) {
 
 async function init() {
   buildToolbar();
-
 
   let stream;
   if (DEMO) {
@@ -181,41 +179,25 @@ function computeQuad(hands) {
   return pts;
 }
 
-// Re-order points by angle around their centroid (canonical simple polygon).
-function angleSort(pts) {
-  const cx = pts.reduce((s, p) => s + p.x, 0) / pts.length;
-  const cy = pts.reduce((s, p) => s + p.y, 0) / pts.length;
-  return [...pts].sort(
-    (a, b) => Math.atan2(a.y - cy, a.x - cx) - Math.atan2(b.y - cy, b.x - cx)
-  );
-}
-
-// A self-intersecting (bowtie) corner ordering has near-zero shoelace area
-// because its two halves cancel. If the current order is twisted — which can
-// happen when hands cross over each other — re-canonicalize so the quad
-// untwists instead of staying stuck.
-function untwist(pts) {
-  const sorted = angleSort(pts);
-  return polygonArea(pts) < 0.6 * polygonArea(sorted) ? sorted : pts;
-}
-
-// Keep corner identity stable across frames: greedily assign each previous
-// corner its nearest target point, so the quad can't twist when the
-// angle-sort ordering flips during hand rotation.
-function matchToPrev(target, prev) {
-  const remaining = [...target];
-  return prev.map((c) => {
-    let best = 0;
-    let bestD = Infinity;
-    remaining.forEach((p, i) => {
-      const d = dist(c, p);
+// Align an angle-sorted target quad with the previous corners. Only cyclic
+// rotations and reversal of the sorted order are considered — every candidate
+// stays a simple (non-self-intersecting) polygon, so the quad can never lock
+// into a twisted bowtie no matter how the hands cross, while corner identity
+// still carries over smoothly frame to frame.
+function alignQuad(target, prev) {
+  let best = target;
+  let bestD = Infinity;
+  for (const dir of [1, -1]) {
+    for (let off = 0; off < 4; off++) {
+      const cand = [0, 1, 2, 3].map((i) => target[(off + dir * i + 8) % 4]);
+      const d = cand.reduce((s, p, i) => s + dist(p, prev[i]), 0);
       if (d < bestD) {
         bestD = d;
-        best = i;
+        best = cand;
       }
-    });
-    return remaining.splice(best, 1)[0];
-  });
+    }
+  }
+  return best;
 }
 
 function polygonArea(pts) {
@@ -656,7 +638,7 @@ function loop() {
       corners = targetQuad;
       presence = Math.min(1, presence + 0.12);
     } else {
-      const matched = matchToPrev(targetQuad, corners);
+      const matched = alignQuad(targetQuad, corners);
       const moved =
         matched.reduce((s, p, i) => s + dist(p, corners[i]), 0) / 4;
       // Occluded/crossing hands produce wild one-frame mis-detections.
@@ -672,7 +654,7 @@ function loop() {
         // Adaptive smoothing: follow briskly for normal motion, heavily
         // damped for large deltas so glitches read as a wobble, not a snap.
         const alpha = moved > canvas.width * 0.08 ? 0.15 : 0.4;
-        corners = untwist(corners.map((c, i) => lerpPt(c, matched[i], alpha)));
+        corners = corners.map((c, i) => lerpPt(c, matched[i], alpha));
         presence = Math.min(1, presence + 0.12);
       }
     }
