@@ -377,7 +377,10 @@ function applyEffect(q) {
     }
     case "ai": {
       if (aiState === "ready" && aiImage) {
-        drawImageToQuad(ctx, aiImage, orderForTexture(q));
+        // The stylized image is a full-frame render aligned with the camera
+        // feed — draw it screen-aligned so the finger frame acts as a window
+        // revealing it, staying registered with the real scene as hands move.
+        ctx.drawImage(aiImage, 0, 0, w, h);
       } else {
         // Waiting / generating: blurred feed + shimmer sweep + status text.
         ctx.filter = "blur(10px) brightness(0.85) saturate(1.1)";
@@ -437,37 +440,29 @@ function drawQuadLabel(q, text) {
 
 // ---- AI generation (Gemini image-to-image) ----
 
-// Capture the framed region (bounding box of the quad, padded) as base64 JPEG.
-function captureQuadRegion(q) {
+// Capture the entire (mirrored) camera frame as base64 JPEG. The whole scene
+// is stylized so the result stays aligned with the feed and the finger frame
+// can act as a moving window over it.
+function captureFrame() {
   const w = canvas.width;
   const h = canvas.height;
-  if (snap.width !== w || snap.height !== h) {
-    snap.width = w;
-    snap.height = h;
+  const maxSide = 1024;
+  const scale = Math.min(1, maxSide / Math.max(w, h));
+  const outW = Math.round(w * scale);
+  const outH = Math.round(h * scale);
+  if (snap.width !== outW || snap.height !== outH) {
+    snap.width = outW;
+    snap.height = outH;
   }
-  drawMirrored(snapCtx, w, h);
-
-  const b = quadBBox(q);
-  const pad = Math.max(b.x1 - b.x0, b.y1 - b.y0) * 0.08;
-  const x0 = Math.max(0, b.x0 - pad);
-  const y0 = Math.max(0, b.y0 - pad);
-  const cw = Math.min(w, b.x1 + pad) - x0;
-  const ch = Math.min(h, b.y1 + pad) - y0;
-
-  const maxSide = 768;
-  const scale = Math.min(1, maxSide / Math.max(cw, ch));
-  const out = document.createElement("canvas");
-  out.width = Math.max(64, Math.round(cw * scale));
-  out.height = Math.max(64, Math.round(ch * scale));
-  out.getContext("2d").drawImage(snap, x0, y0, cw, ch, 0, 0, out.width, out.height);
-  return out.toDataURL("image/jpeg", 0.85).split(",")[1];
+  drawMirrored(snapCtx, outW, outH);
+  return snap.toDataURL("image/jpeg", 0.85).split(",")[1];
 }
 
-async function generateAI(q) {
+async function generateAI() {
   aiState = "generating";
   aiError = "";
   try {
-    const imageB64 = captureQuadRegion(q);
+    const imageB64 = captureFrame();
     const res = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${AI_MODEL}:generateContent`,
       {
@@ -514,72 +509,6 @@ async function generateAI(q) {
       if (aiState === "error") aiState = "idle";
     }, 4000);
   }
-}
-
-// ---- Quad texture mapping (draws an image warped into the finger frame) ----
-
-// Order quad corners TL, TR, BR, BL so the texture maps upright.
-function orderForTexture(q) {
-  const s = [...q].sort((a, b) => a.y - b.y);
-  const top = s.slice(0, 2).sort((a, b) => a.x - b.x);
-  const bot = s.slice(2).sort((a, b) => a.x - b.x);
-  return [top[0], top[1], bot[1], bot[0]];
-}
-
-// Draw img into an arbitrary quad [TL, TR, BR, BL] using a subdivided grid of
-// affine-mapped triangles (bilinear surface — good enough at grid 6).
-function drawImageToQuad(c, img, quad, grid = 6) {
-  const surf = (u, v) => {
-    const top = lerpPt(quad[0], quad[1], u);
-    const bot = lerpPt(quad[3], quad[2], u);
-    return lerpPt(top, bot, v);
-  };
-  const iw = img.width;
-  const ih = img.height;
-  for (let i = 0; i < grid; i++) {
-    for (let j = 0; j < grid; j++) {
-      const u0 = i / grid, u1 = (i + 1) / grid;
-      const v0 = j / grid, v1 = (j + 1) / grid;
-      const p00 = surf(u0, v0), p10 = surf(u1, v0);
-      const p11 = surf(u1, v1), p01 = surf(u0, v1);
-      const uv00 = [u0 * iw, v0 * ih], uv10 = [u1 * iw, v0 * ih];
-      const uv11 = [u1 * iw, v1 * ih], uv01 = [u0 * iw, v1 * ih];
-      drawTexturedTriangle(c, img, [p00, p10, p11], [uv00, uv10, uv11]);
-      drawTexturedTriangle(c, img, [p00, p11, p01], [uv00, uv11, uv01]);
-    }
-  }
-}
-
-function drawTexturedTriangle(c, img, pts, uvs) {
-  const [[u0, v0], [u1, v1], [u2, v2]] = uvs;
-  const [p0, p1, p2] = pts;
-  const den = u0 * (v1 - v2) + u1 * (v2 - v0) + u2 * (v0 - v1);
-  if (!den) return;
-  const a = (p0.x * (v1 - v2) + p1.x * (v2 - v0) + p2.x * (v0 - v1)) / den;
-  const b = (p0.y * (v1 - v2) + p1.y * (v2 - v0) + p2.y * (v0 - v1)) / den;
-  const cc = (p0.x * (u2 - u1) + p1.x * (u0 - u2) + p2.x * (u1 - u0)) / den;
-  const d = (p0.y * (u2 - u1) + p1.y * (u0 - u2) + p2.y * (u1 - u0)) / den;
-  const e = p0.x - a * u0 - cc * v0;
-  const f = p0.y - b * u0 - d * v0;
-  // Clip to the triangle expanded ~0.7px outward so adjacent cells overlap
-  // and no hairline seams show between grid cells.
-  const cx = (p0.x + p1.x + p2.x) / 3;
-  const cy = (p0.y + p1.y + p2.y) / 3;
-  const ex = pts.map((p) => {
-    const dx = p.x - cx, dy = p.y - cy;
-    const len = Math.hypot(dx, dy) || 1;
-    return { x: p.x + (dx / len) * 0.7, y: p.y + (dy / len) * 0.7 };
-  });
-  c.save();
-  c.beginPath();
-  c.moveTo(ex[0].x, ex[0].y);
-  c.lineTo(ex[1].x, ex[1].y);
-  c.lineTo(ex[2].x, ex[2].y);
-  c.closePath();
-  c.clip();
-  c.transform(a, b, cc, d, e, f);
-  c.drawImage(img, 0, 0);
-  c.restore();
 }
 
 // ---- Toon: cel-shaded cartoon version of the live feed ----
@@ -719,7 +648,7 @@ function loop() {
       }
       if (stableFrames > 20) {
         stableFrames = 0;
-        generateAI(corners);
+        generateAI();
       }
     }
     lastRawQuad = targetQuad;
