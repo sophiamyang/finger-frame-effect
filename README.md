@@ -16,7 +16,6 @@ Built with [MediaPipe Hand Landmarker](https://ai.google.dev/edge/mediapipe/solu
 | **this app** — live camera, local effects | Canvas 2D (Van Gogh, toon, glitch, …) | none |
 | [finger-frame-effect-ai](https://sophiamyang.github.io/finger-frame-effect-ai/) ([repo](https://github.com/sophiamyang/finger-frame-effect-ai)) — recorded video, AI restyle | Gemini Omni Flash (offline video edit) | minutes |
 | [finger-frame-effect-lucy](https://sophiamyang.github.io/finger-frame-effect-lucy/) ([repo](https://github.com/sophiamyang/finger-frame-effect-lucy)) — live camera, live AI | Decart Lucy 2.5 (realtime video-to-video) | ~real time |
-| [finger-pet](https://sophiamyang.github.io/finger-pet/) ([repo](https://github.com/sophiamyang/finger-pet)) — hand-tracked virtual pet cat | AI-generated sprites + game logic | none |
 
 ## Run
 
